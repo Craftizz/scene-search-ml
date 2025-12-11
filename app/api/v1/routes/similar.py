@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Depends
 import numpy as np
 
 from app.manager.model_manager import ModelManager
+from app.security.auth import verify_api_key
 from app.services.embedder_service import Embedder
 from app.services.similarity_service import Similarity
 
@@ -32,7 +33,8 @@ async def get_model() -> Embedder:
 async def similar(
     embedder: Annotated[Embedder, Depends(get_model)],
     string: str,
-    frames: list[dict[str, Any]]
+    frames: list[dict[str, Any]],
+    api_key: str = Depends(verify_api_key),
 ):
     """Accept a text string and return similar frames based on embeddings."""
 

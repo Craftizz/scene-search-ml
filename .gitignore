@@ -1,1 +1,53 @@
-/data
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# dotenv files (may contain secrets)
+.env
+.env.*
+!.env.example
+
+# IDEs and editors
+.vscode/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and runtime files
+*.log
+logs/
+*.pid
+*.seed
+*.pid.lock
+
+# Large data / artifacts
+data/
+data/*
+
+# ML model artifacts
+*.ckpt
+*.pth
+*.pt
+*.h5
+model/
+models/
+checkpoints/
+runs/
+wandb/
+mlruns/
+
+# Secrets and keys
+*.pem
+*.key
+*.cert
+
+# Databases
+*.sqlite3
+*.db
+
+# Misc
+*.swp
+*.swo

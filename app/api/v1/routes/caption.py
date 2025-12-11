@@ -5,6 +5,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from pydantic import BaseModel
 from PIL import Image
 
+from app.security.auth import verify_api_key
 from app.manager.model_manager import ModelManager
 from app.services.captioner_service import Captioner
 
@@ -29,6 +30,7 @@ async def get_model() -> Captioner:
 async def caption_images(
     captioner: Annotated[Captioner, Depends(get_model)],
     files: List[UploadFile] = File(...),
+    api_key: str = Depends(verify_api_key),
 ):
     """Accept one or more uploaded images and return generated captions."""
 

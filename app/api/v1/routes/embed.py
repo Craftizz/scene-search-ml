@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from PIL import Image
 
 from app.manager.model_manager import ModelManager
+from app.security.auth import verify_api_key
 from app.services.embedder_service import Embedder
 
 
@@ -29,6 +30,7 @@ async def get_model() -> Embedder:
 async def embed_images(
     embedder: Annotated[Embedder, Depends(get_model)],
     files: List[UploadFile] = File(...),
+    api_key: str = Depends(verify_api_key),
 ):
     """Accept one or more uploaded images and return generated embeddings.
 
