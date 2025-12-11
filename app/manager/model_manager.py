@@ -1,6 +1,3 @@
-
-
-
 import logging
 from app.services.captioner_service import Captioner, CaptionerConfig
 from app.services.embedder_service import Embedder, EmbedderConfig
