@@ -1,0 +1,8 @@
+.search {
+    height: 100svh;
+    width: 30svw;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    padding: 1rem 4px;
+}

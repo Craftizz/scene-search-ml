@@ -1,0 +1,35 @@
+.searchbar {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 8px;
+}
+
+.searchBarLabel {
+    font-size: var(--font-size-xs);
+    color: var(--text-subtle);
+}
+
+.searchBarInput {
+  flex: 1 1 auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 0.5rem;
+  border: 1px solid var(--border);
+  border: transparent;
+  background: var(--surface-1);
+  font-size: 14px;
+  outline: none;
+  font-family: var(--font1);
+}
+
+.searchBarInput:focus {
+  /* box-shadow: 0 0 0 3px rgba(59,130,246,0.12); */
+  border-color: rgba(59,130,246,0.8);
+}
+
+.searchBarInput::placeholder {
+    font-size: var(--font-size-xs);
+    color: var(--text-subtle);
+}
