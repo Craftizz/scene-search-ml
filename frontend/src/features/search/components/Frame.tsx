@@ -3,7 +3,7 @@
 import styles from "./Frame.module.css";
 import { useVideoFrames } from "@/features/video/context/VideoFramesContext";
 import type { CaptionedFrame } from "@/types/types";
-import { formatTimecode } from "@/features/search/utils/formatTimecode";
+import { formatTimecode } from "@/utils/formatTimecode";
 
 type Props = {
   frame: CaptionedFrame;
@@ -36,6 +36,8 @@ export default function Frame({ frame, index = 0, onSelect }: Props) {
         ) : (
           <SkeletonCaption />
         )}
+        {/* Debug: show match probability and similarity when available */}
+        {/* debug info removed */}
       </div>
     </div>
   );

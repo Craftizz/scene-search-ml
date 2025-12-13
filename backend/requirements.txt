@@ -1,0 +1,23 @@
+# Core web framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Machine Learning
+torch>=2.0.0
+transformers>=4.35.0
+pillow>=10.0.0
+einops>=0.6.0
+
+# Configuration and environment
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+
+# File handling
+python-multipart>=0.0.6
+
+# Development and logging
+python-json-logger>=2.0.0
+
+# Optional: For better performance
+accelerate>=0.25.0

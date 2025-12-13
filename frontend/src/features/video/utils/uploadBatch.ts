@@ -1,8 +1,9 @@
 import sendBatch from "./sendBatch";
+import sendEmbeddingBatch from "./sendEmbeddingBatch";
 
 type Item = {
   file: File;
-  resolve: (c: string) => void;
+  resolve: (c: { caption: string; embedding?: number[] }) => void;
   reject: (e: any) => void;
 };
 
@@ -21,8 +22,8 @@ export class BatchUploader {
     this.endpoint = opts?.endpoint;
   }
 
-  add(file: File): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
+  add(file: File): Promise<{ caption: string; embedding?: number[] }> {
+    return new Promise<{ caption: string; embedding?: number[] }>((resolve, reject) => {
       this.queue.push({ file, resolve, reject });
       if (this.queue.length >= this.batchSize) {
         this.flush();
@@ -51,10 +52,19 @@ export class BatchUploader {
     const files = items.map((i) => i.file);
     try {
       const captions = await sendBatch(files, this.apiKey, this.endpoint);
+      // attempt embeddings in parallel; don't fail the whole batch if embeddings fail
+      let embeddings: (number[] | undefined)[] = [];
+      try {
+        embeddings = await sendEmbeddingBatch(files, this.apiKey);
+      } catch (e) {
+        embeddings = [];
+      }
+
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
         const cap = captions[i] ?? "";
-        it.resolve(cap);
+        const emb = embeddings[i];
+        it.resolve({ caption: cap, embedding: emb });
       }
     } catch (e) {
       for (const it of items) it.reject(e);

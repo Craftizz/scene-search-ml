@@ -69,15 +69,15 @@ export async function extractFramesStream(
   if (!ctx) throw new Error("Canvas 2D not supported");
 
   // Internal wrapper to receive possible blob and enqueue for upload
-  const wrappedOnFrame = (frame: CaptionedFrame, blob?: Blob) => {
+    const wrappedOnFrame = (frame: CaptionedFrame, blob?: Blob) => {
     // Immediately notify consumer so UI can show the thumbnail
     onFrame(frame);
     if (!blob) return;
 
     try {
       const file = new File([blob], `frame-${frame.timestamp}.jpg`, { type: "image/jpeg" });
-      uploader.add(file).then((caption) => {
-        options?.onCaption?.({ ...frame, caption });
+        uploader.add(file).then(({ caption, embedding }) => {
+          options?.onCaption?.({ ...frame, caption, embedding });
       }).catch((err) => {
         console.warn("upload failed for frame", frame.timestamp, err);
       });

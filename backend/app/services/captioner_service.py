@@ -4,19 +4,23 @@ from typing import Optional, List
 from PIL import Image
 import asyncio
 import torch
-from transformers import BlipForConditionalGeneration, BlipProcessor
+import logging
+from transformers import AutoProcessor, AutoModelForCausalLM
+
+logger = logging.getLogger("scene_search")
 
 
 @dataclass
 class CaptionerConfig:
-
-    processor_name: str = "Salesforce/blip-image-captioning-base"
-    model_name: str = "Salesforce/blip-image-captioning-base"
+    # Use Florence-2-base by default for richer, less-hallucinating captions
+    processor_name: str = "microsoft/Florence-2-base"
+    model_name: str = "microsoft/Florence-2-base"
 
     device: Optional[str] = None
     use_fp16: bool = False
     batch_size: int = 4
-    max_length: int = 50
+    max_new_tokens: int = 1024
+
 
 
 @dataclass
@@ -25,8 +29,6 @@ class CaptionResult:
 
 
 class Captioner:
-
-
     def __init__(self, config: CaptionerConfig):
         self.config = config
 
@@ -37,17 +39,42 @@ class Captioner:
 
         # For thread/async-safety when using shared model
         self._lock = asyncio.Lock()
-        self.processor = BlipProcessor.from_pretrained(config.processor_name, use_fast=True)
-        self.model = BlipForConditionalGeneration.from_pretrained(config.model_name)
 
-        self.model.to(self.device)  # type: ignore
-        if config.use_fp16 and str(self.device).startswith("cuda"):
-            try:
-                self.model.half()
-            except Exception:
-                pass
-
-        self.model.eval()
+        # Load model with proper dtype
+        torch_dtype = torch.float16 if config.use_fp16 and self.device.type == "cuda" else torch.float32
+        
+        try:
+            # Load model configuration first to set attention implementation
+            from transformers import AutoConfig
+            model_config = AutoConfig.from_pretrained(
+                config.model_name,
+                trust_remote_code=True
+            )
+            # Disable SDPA to avoid compatibility issues
+            model_config._attn_implementation = "eager"
+            
+            self.model = AutoModelForCausalLM.from_pretrained(
+                config.model_name, 
+                config=model_config,
+                torch_dtype=torch_dtype,
+                trust_remote_code=True,
+                device_map="auto" if self.device.type == "cuda" else None
+            )
+            
+            self.processor = AutoProcessor.from_pretrained(
+                config.processor_name, 
+                trust_remote_code=True
+            )
+            
+            # Move to device if not using device_map
+            if self.device.type != "cuda":
+                self.model.to(self.device)  # type: ignore
+                
+            logger.info("Florence2 model loaded successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to load Florence2 model: {e}")
+            raise
 
 
     async def caption(self, images: List[Image.Image]) -> List[CaptionResult]:
@@ -75,15 +102,94 @@ class Captioner:
         # Process in batches
         for i in range(0, len(images), self.config.batch_size):
             batch = images[i : i + self.config.batch_size]
-            inputs = self.processor(images=batch, return_tensors="pt")  # type: ignore[arg-type]
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
-
-            # generate under lock to avoid concurrent GPU usage issues
-            async with self._lock:
-                with torch.no_grad():
-                    out_ids = self.model.generate(**inputs, max_length=self.config.max_length)  # type: ignore
-
-            captions = self.processor.batch_decode(out_ids, skip_special_tokens=True)
-            results.extend(CaptionResult(text=t) for t in captions)
+            batch_results = await self._process_batch(batch)
+            results.extend(batch_results)
 
         return results
+
+
+    async def _process_batch(self, images: List[Image.Image]) -> List[CaptionResult]:
+        """Process a batch of images for captioning."""
+        
+        try:
+            # generate under lock to avoid concurrent GPU usage issues
+            async with self._lock:
+
+                captions = []
+                for idx, image in enumerate(images):
+                    try:
+                        caption = await self._generate_single_caption(image)
+                        captions.append(caption)
+                    except Exception as e:
+                        logger.warning(f"Failed to generate caption for image {idx}: {e}")
+                        captions.append("An error occurred")
+
+            return [CaptionResult(text=caption) for caption in captions]
+            
+        except Exception as e:
+            logger.error(f"Error processing batch: {e}")
+            return [CaptionResult(text="An error occurred") for _ in images]
+
+
+    async def _generate_single_caption(self, image: Image.Image) -> str:
+        """Generate caption for a single image."""
+        
+        # Florence2 prompt for captioning
+        prompt = "<CAPTION>"
+        
+        try:
+
+            inputs = self.processor(text=prompt, images=image, return_tensors="pt")
+            inputs = {k: v.to(self.device) if hasattr(v, 'to') else v for k, v in inputs.items()}
+            
+            # Generate caption - Florence2 specific approach
+            with torch.no_grad():
+                # Use the model's generate method without problematic parameters
+                generated_ids = self.model.generate(
+                    **inputs,
+                    max_new_tokens=1024,
+                    do_sample=False,
+                    use_cache=False
+                )
+
+            generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
+            parsed_answer = self.processor.post_process_generation(
+                generated_text, 
+                task=prompt, 
+                image_size=(image.width, image.height)
+            )
+            
+            if isinstance(parsed_answer, dict) and prompt in parsed_answer:
+                caption = parsed_answer[prompt]
+                if caption and isinstance(caption, str):
+                    return caption.strip()
+            
+            return self._extract_caption_fallback(generated_text, prompt)
+            
+        except Exception as e:
+            logger.warning(f"Error in single caption generation: {e}")
+            return "An error occurred"
+
+
+    def _extract_caption_fallback(self, generated_text: str, prompt: str) -> str:
+        """Fallback method to extract caption from generated text."""
+        
+        try:
+            # Florence2 typically returns text in format: <prompt>caption</prompt>
+            start_marker = prompt
+            end_marker = "</s>"
+            
+            start_idx = generated_text.find(start_marker)
+            if start_idx != -1:
+                start_idx += len(start_marker)
+                end_idx = generated_text.find(end_marker, start_idx)
+                if end_idx != -1:
+                    caption = generated_text[start_idx:end_idx].strip()
+                    if caption:
+                        return caption
+            
+            # If parsing fails, return a cleaned version
+            return generated_text.strip() or "Unable to generate caption"
+            
+        except Exception:
+            return "Unable to generate caption"
