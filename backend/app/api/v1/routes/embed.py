@@ -1,10 +1,9 @@
 from io import BytesIO
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from pydantic import BaseModel
 from PIL import Image
-
 from app.manager.model_manager import ModelManager
 from app.security.auth import verify_api_key
 from app.services.embedder_service import Embedder
@@ -13,8 +12,12 @@ from app.services.embedder_service import Embedder
 router = APIRouter(prefix="/v1/embedding", tags=["embedding"])
 
 
-class EmbeddedResponse(BaseModel):
+class EmbeddedFrames(BaseModel):
     vector: list[float]
+
+
+class EmbeddingBatchResponse(BaseModel):
+    frames: List[EmbeddedFrames]
 
 
 async def get_model() -> Embedder:
@@ -26,7 +29,7 @@ async def get_model() -> Embedder:
         raise HTTPException(status_code=503, detail=str(e))
 
 
-@router.post("/", response_model=List[EmbeddedResponse])
+@router.post("/", response_model=EmbeddingBatchResponse)
 async def embed_images(
     embedder: Annotated[Embedder, Depends(get_model)],
     files: List[UploadFile] = File(...),
@@ -35,7 +38,9 @@ async def embed_images(
     """Accept one or more uploaded images and return generated embeddings.
 
     Upload multiple files with form field name `files`. Returns a list of
-    embedding vectors preserving the order of uploaded files.
+    embedding vectors preserving the order of uploaded files. This endpoint
+    only returns embeddings; scene boundary detection and similarity
+    comparisons are handled by other services.
     """
 
     images: List[Image.Image] = []
@@ -52,10 +57,11 @@ async def embed_images(
             raise HTTPException(status_code=400, detail="Unable to parse one of the image files")
 
         images.append(img)
-
     try:
         results = await embedder.embed_images(images)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Embedding generation failed: {e}")
 
-    return [EmbeddedResponse(vector=r.vector) for r in results]
+    frames_out = [EmbeddedFrames(vector=r.vector) for r in results]
+
+    return EmbeddingBatchResponse(frames=frames_out)

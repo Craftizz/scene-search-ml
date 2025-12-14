@@ -1,14 +1,18 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useState } from "react";
-import { CaptionedFrame } from "@/types/types";
+import { createContext, useCallback, useContext, useRef, useState } from "react";
+import { Frame, Scene } from "@/types/types";
 
 type VideoFramesContextValue = {
-  frames: CaptionedFrame[];
-  addFrame: (f: CaptionedFrame) => void;
+  frames: Frame[];
+  scenes: Scene[];
+  addFrame: (f: Frame) => void;
+  addScene: (s: Scene) => void;
+  clearScenes: () => void;
+  setScenes: (list: Scene[]) => void;
   clearFrames: () => void;
-  setFrames: (list: CaptionedFrame[]) => void;
-  updateFrame: (f: CaptionedFrame) => void;
+  setFrames: (list: Frame[]) => void;
+  updateFrame: (f: Frame) => void;
   registerVideo?: (el: HTMLVideoElement | null) => void;
   seekTo?: (seconds: number, play?: boolean) => void;
 };
@@ -20,11 +24,16 @@ const VideoFramesContext = createContext<VideoFramesContextValue | undefined>(
 export const VideoFramesProvider: React.FC<React.PropsWithChildren<{}>> = ({
   children,
 }) => {
-  const [frames, setFramesState] = useState<CaptionedFrame[]>([]);
-  const videoRef = React.useRef<HTMLVideoElement | null>(null);
+  const [frames, setFramesState] = useState<Frame[]>([]);
+  const [scenes, setScenesState] = useState<Scene[]>([]);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  const addFrame = useCallback((frame: CaptionedFrame) => {
+  const addFrame = useCallback((frame: Frame) => {
     setFramesState((prev) => [...prev, frame]);
+  }, []);
+
+    const addScene = useCallback((scene: Scene) => {
+    setScenesState((prev) => [...prev, scene]);
   }, []);
 
   const clearFrames = useCallback(() => {
@@ -38,7 +47,11 @@ export const VideoFramesProvider: React.FC<React.PropsWithChildren<{}>> = ({
     });
   }, []);
 
-  const setFrames = useCallback((list: CaptionedFrame[]) => {
+  const clearScenes = useCallback(() => {
+    setScenesState(() => []);
+  }, []);
+
+  const setFrames = useCallback((list: Frame[]) => {
     setFramesState((prev) => {
       prev.forEach((p) => {
         try {
@@ -49,7 +62,11 @@ export const VideoFramesProvider: React.FC<React.PropsWithChildren<{}>> = ({
     });
   }, []);
 
-  const updateFrame = useCallback((frame: CaptionedFrame) => {
+  const setScenes = useCallback((list: Scene[]) => {
+    setScenesState(() => list);
+  }, []);
+
+  const updateFrame = useCallback((frame: Frame) => {
     setFramesState((prev) => prev.map((p) => (p.timestamp === frame.timestamp && p.url === frame.url ? frame : p)));
   }, []);
 
@@ -82,7 +99,7 @@ export const VideoFramesProvider: React.FC<React.PropsWithChildren<{}>> = ({
 
   return (
     <VideoFramesContext.Provider
-      value={{ frames, addFrame, clearFrames, setFrames, updateFrame, registerVideo, seekTo }}
+      value={{ frames, scenes, addFrame, addScene, clearFrames, clearScenes, setFrames, setScenes, updateFrame, registerVideo, seekTo }}
     >
       {children}
     </VideoFramesContext.Provider>

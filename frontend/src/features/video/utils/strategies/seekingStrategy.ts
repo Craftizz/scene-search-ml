@@ -1,11 +1,11 @@
-import { CaptionedFrame } from "@/types/types";
+import { Frame } from "@/types/types";
 
 export async function seekingStrategy(
   video: HTMLVideoElement,
   times: number[],
   canvas: HTMLCanvasElement,
   ctx: CanvasRenderingContext2D,
-  onFrame: (frame: CaptionedFrame, blob?: Blob) => void
+  onFrame: (frame: Frame, blob: Blob) => void
 ): Promise<void> {
   const toBlobUrl = (blob: Blob) => URL.createObjectURL(blob);
 

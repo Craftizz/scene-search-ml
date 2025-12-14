@@ -17,7 +17,7 @@ export default function VideoDisplay({
 }) {
 
   const { registerVideo, frames } = useVideoFrames();
-  const localRef = useRef<HTMLVideoElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const {
     playing,
@@ -30,7 +30,7 @@ export default function VideoDisplay({
     togglePlay,
     seekTo,
     toggleMute,
-  } = useVideoControls(localRef);
+  } = useVideoControls(videoRef);
 
   const progressRef = useRef<HTMLDivElement | null>(null);
   const thumbRef = useRef<HTMLDivElement | null>(null);
@@ -38,8 +38,8 @@ export default function VideoDisplay({
   const thumbnails = useVideoThumbnails(frames, containerWidth, duration);
 
   useEffect(() => {
-    registerVideo?.(localRef.current ?? null);
-  }, [localRef.current, registerVideo]);
+    registerVideo?.(videoRef.current ?? null);
+  }, [videoRef.current, registerVideo]);
 
   const handleTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
     setCurrent(e.currentTarget.currentTime);
@@ -49,9 +49,6 @@ export default function VideoDisplay({
     const v = e.currentTarget;
     setDuration(isFinite(v.duration) ? v.duration : null);
   };
-
-  const handlePlay = () => setPlaying(true);
-  const handlePause = () => setPlaying(false);
 
   const onProgressClick = useCallback(
     (e: React.MouseEvent) => {
@@ -66,6 +63,9 @@ export default function VideoDisplay({
     [duration, seekTo]
   );
 
+  const handlePlay = () => setPlaying(true);
+  const handlePause = () => setPlaying(false);
+
   return (
     <div className={styles.playerWrapper}>
       {src && (
@@ -73,7 +73,7 @@ export default function VideoDisplay({
           <div className={styles.videoContainer}>
             <video
               ref={(el) => {
-                localRef.current = el;
+                videoRef.current = el;
                 registerVideo?.(el ?? null);
               }}
               className={styles.videoplayer}

@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from app.api.v1.routes.caption import router as caption_router
 from app.api.v1.routes.embed import router as embedding_router
 from app.api.v1.routes.similar import router as similar_router
+from app.api.v1.ws.analyze import router as ws_embedding_router
 from app.manager.model_manager import ModelManager
 from app.core.config import settings
 
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI):
     app.include_router(caption_router)
     app.include_router(embedding_router)
     app.include_router(similar_router)
+    app.include_router(ws_embedding_router)
     yield
 
     logger.info("Shutting down application")

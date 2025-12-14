@@ -4,11 +4,12 @@ import SearchBar from "./SearchBar";
 import styles from "./Search.module.css";
 import { useVideoFrames } from "../../video/context/VideoFramesContext";
 import { useState } from "react";
-import type { CaptionedFrame } from "@/types/types";
+import type { Frame, Scene } from "@/types/types";
 
 export default function Search() {
-  const { frames } = useVideoFrames();
-  const [results, setResults] = useState<CaptionedFrame[] | null>(null);
+
+  const { frames, scenes } = useVideoFrames();
+  const [results, setResults] = useState<Frame[] | Scene[] | null>(null);
 
   async function handleSearch(query?: string) {
     if (!query) {
@@ -16,19 +17,20 @@ export default function Search() {
       return;
     }
 
-    // send only frames that have embeddings
-    const framesWithEmb = frames.filter((f) => Array.isArray(f.embedding) && f.embedding.length > 0);
-
-    console.log(`[Search] Query: "${query}"`);
-    console.log(`[Search] Frames with embeddings: ${framesWithEmb.length}`);
+    // Only frames with embeddings can be searched
+    const embeddedFrames = frames.filter(
+      (f) => Array.isArray(f.embedding) && f.embedding.length > 0
+    );
 
     try {
+
       // Ensure frames are plain JSON (no methods, no typed arrays)
-      const payloadFrames = framesWithEmb.map((f) => ({
-        timestamp: Number(f.timestamp),
-        url: String(f.url),
-        caption: f.caption ?? "",
-        embedding: Array.isArray(f.embedding) ? f.embedding.map((n) => Number(n)) : undefined,
+      const payloadFrames = embeddedFrames.map((embeddedFrame) => ({
+        timestamp: Number(embeddedFrame.timestamp),
+        url: String(embeddedFrame.url),
+        embedding: Array.isArray(embeddedFrame.embedding)
+          ? embeddedFrame.embedding.map((n) => Number(n))
+          : undefined,
       }));
 
       const resp = await fetch(`/api/similar`, {
@@ -38,27 +40,30 @@ export default function Search() {
       });
 
       if (!resp.ok) {
-        const text = await resp.text().catch(() => "");
-        console.error("Search failed", resp.status, text);
-        throw new Error(`Search failed: ${resp.status}`);
+
+          throw new Error(`Search failed: ${resp.status}`);
       }
 
       const data = await resp.json();
-      console.log(`[Search] Results:`, data);
-      // backend returns { results: [{ frame: {...}, similarity, probability }] }
-      const mapped: CaptionedFrame[] = (data.results || []).map((r: any) => r.frame as CaptionedFrame);
-      console.log(`[Search] Mapped frames: ${mapped.length}`);
+      const mapped: Frame[] = (data.results || []).map(
+        (r: any) => r.frame as Frame
+      );
+
       setResults(mapped);
+
     } catch (e) {
-      console.error("Search error", e);
+
       setResults([]);
     }
   }
 
+  // Show `results` when a query is active; otherwise show detected `scenes` only.
+  const resultDisplay: Frame[] | Scene[] = results ?? (scenes ?? []);
+
   return (
     <div className={styles.search}>
       <SearchBar onSearch={handleSearch} />
-      <Results frames={results ?? frames} />
+      <Results items={resultDisplay} type={results ? "frames" : "scenes"} />
     </div>
   );
 }

@@ -14,12 +14,14 @@ export class BatchUploader {
   private readonly batchTimeout: number;
   private readonly apiKey?: string;
   private readonly endpoint?: string;
+  private readonly onScene?: (imageDataUrl: string, timestamp?: number) => void;
 
-  constructor(opts?: { batchSize?: number; batchTimeout?: number; apiKey?: string; endpoint?: string }) {
+  constructor(opts?: { batchSize?: number; batchTimeout?: number; apiKey?: string; endpoint?: string; onScene?: (imageDataUrl: string, timestamp?: number) => void }) {
     this.batchSize = opts?.batchSize ?? 4;
     this.batchTimeout = opts?.batchTimeout ?? 1500;
     this.apiKey = opts?.apiKey;
     this.endpoint = opts?.endpoint;
+    this.onScene = opts?.onScene;
   }
 
   add(file: File): Promise<{ caption: string; embedding?: number[] }> {
@@ -50,15 +52,27 @@ export class BatchUploader {
 
     const items = this.queue.splice(0, this.batchSize);
     const files = items.map((i) => i.file);
-    try {
-      const captions = await sendBatch(files, this.apiKey, this.endpoint);
-      // attempt embeddings in parallel; don't fail the whole batch if embeddings fail
-      let embeddings: (number[] | undefined)[] = [];
       try {
-        embeddings = await sendEmbeddingBatch(files, this.apiKey);
-      } catch (e) {
-        embeddings = [];
-      }
+        const captions = await sendBatch(files, this.apiKey, this.endpoint);
+        // attempt embeddings in parallel; don't fail the whole batch if embeddings fail
+        let embeddings: (number[] | undefined)[] = [];
+        try {
+          embeddings = await sendEmbeddingBatch(files, this.apiKey, {
+            onEvent: (msg: any) => {
+              if (!msg || typeof msg !== "object") return;
+              if (msg.type === "scene" && msg.image) {
+                try {
+                  // eslint-disable-next-line no-console
+                  console.debug("BatchUploader.onEvent scene", msg.timestamp);
+                  this.onScene?.(msg.image, msg.timestamp);
+                } catch (e) {}
+              }
+            },
+            batch_size: this.batchSize,
+          });
+        } catch (e) {
+          embeddings = [];
+        }
 
       for (let i = 0; i < items.length; i++) {
         const it = items[i];

@@ -1,10 +1,10 @@
 import { useState, useCallback } from "react";
 import styles from "./ThumbnaillProgress.module.css";
-import { CaptionedFrame } from "@/types/types";
+import { Frame } from "@/types/types";
 import { formatTimecode } from "@/utils/formatTimecode";
 
 interface ThumbnailProgressProps {
-  thumbnails: (CaptionedFrame | null)[];
+  thumbnails: (Frame | null)[];
   current: number;
   duration: number | null;
   thumbRef: React.RefObject<HTMLDivElement | null>;

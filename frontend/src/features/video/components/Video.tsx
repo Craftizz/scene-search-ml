@@ -1,22 +1,70 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import styles from "./Video.module.css";
 import VideoDrop from "./VideoDrop";
 import VideoDisplay from "./VideoDisplay";
 import { extractFramesStream } from "../utils/extractFramesStream";
+import { AnalyzeClient, AnalyzeMessage } from "../utils/analyzeWebsocketClient";
 import { useVideoFrames } from "../context/VideoFramesContext";
 
+const apiKey = process.env.NEXT_PUBLIC_API_KEY || "";
+
 export default function Video() {
+
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
-  const [extracting, setExtracting] = useState(false);
-  const [extractedCount, setExtractedCount] = useState(0);
-  const { frames: thumbnails, addFrame, clearFrames, setFrames, updateFrame } = useVideoFrames();
+  const { 
+    addFrame, 
+    addScene, 
+    clearFrames, 
+    updateFrame 
+  } = useVideoFrames();
+
+  const tsToUrlRef =
+    typeof window !== "undefined"
+      ? (window as any)._tsToUrlRef ??
+        ((window as any)._tsToUrlRef = { map: new Map<number, string>() })
+      : { map: new Map<number, string>() };
 
   const handleFileSelected = useCallback((file: File) => {
-    const url = URL.createObjectURL(file);
-    setVideoSrc(url);
+    setVideoSrc(URL.createObjectURL(file));
   }, []);
+
+  function handleEmbedded(timestamps: number[], embeddings: number[][]) {
+    for (let i = 0; i < timestamps.length; i++) {
+      const ts = timestamps[i];
+      const emb = embeddings[i];
+      const url = tsToUrlRef.map.get(ts) || "";
+      if (typeof ts === "number" && Array.isArray(emb) && url) {
+        updateFrame({ timestamp: ts, url, embedding: emb });
+      }
+    }
+  }
+
+  function handleSceneMessage(msg: AnalyzeMessage) {
+
+    const startTimestamp =
+      typeof (msg as any).timestamp === "number"
+        ? (msg as any).timestamp
+        : undefined;
+
+    const endTimestamp =
+      typeof (msg as any).end_timestamp === "number"
+        ? (msg as any).end_timestamp
+        : undefined;
+
+    let url: string | undefined = (msg as any).image;
+    if (!url && typeof startTimestamp === "number") url = tsToUrlRef.map.get(startTimestamp);
+    if (!url && typeof endTimestamp === "number") url = tsToUrlRef.map.get(endTimestamp);
+
+    addScene({
+      id: (msg as any).id ?? Date.now(),
+      timestamp: startTimestamp ?? 0,
+      url: url ?? "",
+      caption: (msg as any).caption,
+      end_timestamp: (msg as any).end_timestamp,
+    });
+  }
 
   useEffect(() => {
     if (!videoSrc) {
@@ -25,18 +73,41 @@ export default function Video() {
     }
 
     let cancelled = false;
+    const client = new AnalyzeClient({ apiKey });
 
-    async function extract() {
+    async function run() {
       try {
-        setExtracting(true);
-        setExtractedCount(0);
         clearFrames();
+        await client.connect();
+
+        client.onMessage((msg: AnalyzeMessage) => {
+          if (msg.type === "scene") {
+            handleSceneMessage(msg);
+            return;
+          }
+          if (
+            msg.type === "embedded_batch" &&
+            Array.isArray(msg.timestamps) &&
+            Array.isArray(msg.embeddings)
+          ) {
+            handleEmbedded(msg.timestamps, msg.embeddings);
+            return;
+          }
+          if (
+            msg.type === "embedded_chunk" &&
+            Array.isArray(msg.timestamps) &&
+            Array.isArray(msg.embeddings)
+          ) {
+            handleEmbedded(msg.timestamps, msg.embeddings);
+            return;
+          }
+        });
 
         await extractFramesStream(
           videoSrc as string,
           1,
           320,
-          (frame) => {
+          async (frame, blob) => {
             if (cancelled) {
               try {
                 URL.revokeObjectURL(frame.url);
@@ -44,34 +115,29 @@ export default function Video() {
               return;
             }
             addFrame(frame);
-            setExtractedCount((c) => c + 1);
-          },
-          {
-            // when captions arrive, update the frame in the context
-            onCaption: (updated) => {
-              if (cancelled) return;
-              try {
-                updateFrame(updated);
-              } catch (e) {
-                console.warn("Failed to update frame with caption", e);
-              }
-            },
+            tsToUrlRef.map.set(frame.timestamp, frame.url);
+            if (!blob) return;
+            try {
+              await client.sendFrame(frame.timestamp, blob);
+            } catch (e) {
+              console.warn("failed to send frame to analyze ws", e);
+            }
           }
         );
-
-        if (!cancelled) setExtracting(false);
-      } catch (err) {
-        setExtracting(false);
-        console.error("Frame extraction failed", err);
+      } catch (e) {
+        console.error("Video extraction failed", e);
+      } finally {
+        client.close();
       }
     }
 
-    extract();
+    run();
 
     return () => {
       cancelled = true;
+      client.close();
     };
-  }, [videoSrc, addFrame, clearFrames, setFrames]);
+  }, [videoSrc, addFrame, addScene, clearFrames, updateFrame, apiKey]);
 
   return (
     <div className={styles.video}>

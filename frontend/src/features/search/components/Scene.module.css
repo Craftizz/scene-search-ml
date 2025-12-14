@@ -1,0 +1,58 @@
+
+.thumbnailImage {
+    width: 100%;
+    height: auto;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: border-color 0.2s ease-in-out;
+}
+
+.thumbnailImage:hover {
+    border-color: var(--border-accent);
+}
+
+.thumbnailScene {
+    font-size: var(--font-size-xs);
+    color: var(--text-muted);
+}
+
+.thumbnailTimestamp {
+    font-size: var(--font-size-xxs);
+    color: var(--text-subtle);
+}
+
+.thumbnailCaption {
+    font-size: var(--font-size-sm);
+    color: var(--text-primary);
+}
+
+.thumbnailDebug {
+  margin-top: 6px;
+  font-size: var(--font-size-xxs);
+  color: var(--text-subtle);
+}
+
+.skeletonItem {
+    
+  display: inline-block;
+}
+
+.skeletonBox {
+    padding-top: 4px;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background-color: var(--surface-1);
+  border-radius: 6px;
+}
+
+.skeletonCaption {
+  content: "";
+  width: 100%;
+  height: 1em;
+  padding: 8px 0;
+  background-color: var(--surface-1);
+  border-radius: 4px;
+}
+

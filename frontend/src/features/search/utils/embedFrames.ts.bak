@@ -1,0 +1,25 @@
+import type { Frame } from "@/types/types";
+import sendEmbeddingBatch from "@/features/video/utils/sendEmbeddingBatch";
+
+export async function embedFrames(frames: Frame[]): Promise<Frame[]> {
+  if (!frames || frames.length === 0) return frames;
+
+  const files: File[] = [];
+  for (const f of frames) {
+    const resp = await fetch(f.url);
+    if (!resp.ok) throw new Error(`Failed to fetch frame image: ${resp.status}`);
+    const blob = await resp.blob();
+    const file = new File([blob], "frame.png", { type: blob.type });
+    files.push(file);
+  }
+
+  // Use websocket-based embedding sender
+  const embeddings = await sendEmbeddingBatch(files);
+
+  return frames.map((f, i) => ({ ...f, embedding: embeddings[i] }));
+}
+
+export async function embedFrame(frame: Frame): Promise<Frame> {
+  const [out] = await embedFrames([frame]);
+  return out;
+}

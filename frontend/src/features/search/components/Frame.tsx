@@ -1,14 +1,15 @@
 "use client";
 
-import styles from "./Frame.module.css";
 import { useVideoFrames } from "@/features/video/context/VideoFramesContext";
-import type { CaptionedFrame } from "@/types/types";
+import type { Frame } from "@/types/types";
 import { formatTimecode } from "@/utils/formatTimecode";
 
+import styles from "./Frame.module.css";
+
 type Props = {
-  frame: CaptionedFrame;
+  frame: Frame;
   index?: number;
-  onSelect?: (frame: CaptionedFrame, index?: number) => void;
+  onSelect?: (frame: Frame, index?: number) => void;
 };
 
 export default function Frame({ frame, index = 0, onSelect }: Props) {
@@ -31,26 +32,7 @@ export default function Frame({ frame, index = 0, onSelect }: Props) {
       />
       <div className={styles.thumbnailDescription}>
         <p className={styles.thumbnailTimestamp}>{formatTimecode(frame.timestamp)}</p>
-        {frame.caption ? (
-          <p className={styles.thumbnailCaption}>{frame.caption}</p>
-        ) : (
-          <SkeletonCaption />
-        )}
-        {/* Debug: show match probability and similarity when available */}
-        {/* debug info removed */}
       </div>
     </div>
   );
-}
-
-export function SkeletonFrame() {
-  return (
-    <div className={`${styles.thumbnailItem || ""} ${styles.skeletonItem || ""}`}>
-      <div className={styles.skeletonBox} />
-    </div>
-  );
-}
-
-export function SkeletonCaption() {
-  return <div className={styles.skeletonCaption} />;
 }
