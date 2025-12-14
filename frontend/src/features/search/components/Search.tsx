@@ -9,10 +9,6 @@ import type { CaptionedFrame } from "@/types/types";
 export default function Search() {
   const { frames } = useVideoFrames();
   const [results, setResults] = useState<CaptionedFrame[] | null>(null);
-  // Use relative ranking: request top 10% of frames
-  const TOP_PERCENT = 0.10;
-  // Optional raw-cosine threshold (range -1..1). Use this to cut on raw similarity.
-  const THRESHOLD_RAW = 0.23;
 
   async function handleSearch(query?: string) {
     if (!query) {
@@ -22,6 +18,9 @@ export default function Search() {
 
     // send only frames that have embeddings
     const framesWithEmb = frames.filter((f) => Array.isArray(f.embedding) && f.embedding.length > 0);
+
+    console.log(`[Search] Query: "${query}"`);
+    console.log(`[Search] Frames with embeddings: ${framesWithEmb.length}`);
 
     try {
       // Ensure frames are plain JSON (no methods, no typed arrays)
@@ -35,7 +34,7 @@ export default function Search() {
       const resp = await fetch(`/api/similar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ string: query, frames: payloadFrames, top_percent: TOP_PERCENT, threshold_raw: THRESHOLD_RAW }),
+        body: JSON.stringify({ string: query, frames: payloadFrames }),
       });
 
       if (!resp.ok) {
@@ -45,8 +44,10 @@ export default function Search() {
       }
 
       const data = await resp.json();
+      console.log(`[Search] Results:`, data);
       // backend returns { results: [{ frame: {...}, similarity, probability }] }
       const mapped: CaptionedFrame[] = (data.results || []).map((r: any) => r.frame as CaptionedFrame);
+      console.log(`[Search] Mapped frames: ${mapped.length}`);
       setResults(mapped);
     } catch (e) {
       console.error("Search error", e);

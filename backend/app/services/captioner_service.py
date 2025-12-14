@@ -134,7 +134,6 @@ class Captioner:
     async def _generate_single_caption(self, image: Image.Image) -> str:
         """Generate caption for a single image."""
         
-        # Florence2 prompt for captioning
         prompt = "<CAPTION>"
         
         try:

@@ -1,4 +1,5 @@
 from typing import Annotated, Any, List, Optional
+import logging
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
@@ -11,13 +12,14 @@ from app.services.similarity_service import Similarity
 
 
 router = APIRouter(prefix="/v1/similar", tags=["similar"])
+logger = logging.getLogger("scene_search")
 
 
 class SimilarRequest(BaseModel):
     string: str
     frames: List[dict[str, Any]]
-    top_percent: Optional[float] = None
-    threshold_raw: Optional[float] = None
+    min_similarity: Optional[float] = 0.0
+    top_k: Optional[int] = 50
 
 
 class SimilarResponse(BaseModel):
@@ -45,50 +47,46 @@ async def similar(
     The request body should be JSON: { "string": "...", "frames": [ {embedding: [...], ...}, ... ] }
     """
 
+    logger.info(f"[Similar] Query: '{payload.string[:50]}...' with {len(payload.frames)} frames")
+
     try:
         query_embedding_result = await embedder.embed_text(payload.string)
         query_vector = query_embedding_result.vector
+        query_arr = np.array(query_vector, dtype=np.float32)
+        logger.info(f"[Similar] Query embedding dim: {len(query_vector)}")
+        logger.info(f"[Similar] Query embedding norm: {np.linalg.norm(query_arr):.4f}")
+        logger.info(f"[Similar] Query embedding sample: {query_arr[:5]}")
+        
+        # Check first frame embedding
+        if payload.frames and 'embedding' in payload.frames[0]:
+            frame_emb = np.array(payload.frames[0]['embedding'], dtype=np.float32)
+            logger.info(f"[Similar] Frame[0] embedding dim: {len(payload.frames[0]['embedding'])}")
+            logger.info(f"[Similar] Frame[0] embedding norm: {np.linalg.norm(frame_emb):.4f}")
+            logger.info(f"[Similar] Frame[0] embedding sample: {frame_emb[:5]}")
 
     except Exception as e:
+        logger.error(f"[Similar] Embedding generation failed: {e}")
         raise HTTPException(status_code=500, detail=f"Embedding generation failed: {e}")
 
     try:
         similarity = Similarity()
 
-        # determine top_k from payload.top_percent (relative). If not provided,
-        # default to 10% of frames.
-        num_frames = len(payload.frames or [])
-        p = float(payload.top_percent) if payload.top_percent is not None else 0.1
-        p = max(0.0, min(1.0, p))
-        # round to nearest integer, but ensure at least 1 result when frames exist
-        top_k_val = max(1, int(round(num_frames * p))) if num_frames > 0 else 0
-
+        # Search with configurable threshold and top_k
+        min_sim = payload.min_similarity if payload.min_similarity is not None else 0.0
+        k = payload.top_k if payload.top_k is not None else 50
+        
         results = similarity.search(
-            query_vector=np.array(query_vector, dtype=np.float32),
+            query_vector=query_arr,
             frames=payload.frames,
-            alpha=0.85,
-            top_k=top_k_val,
-        )
-
-        # Option A (recommended): take the top_k results, then apply a minimum threshold.
-        # If `threshold_raw` is provided, filter by raw cosine (range -1..1) first.
-        if payload.threshold_raw is not None:
-            try:
-                thr_raw = float(payload.threshold_raw)
-            except Exception:
-                thr_raw = -1.0
-            thr_raw = max(-1.0, min(1.0, thr_raw))
-
-            filtered = [r for r in results if r.get("raw_cosine", 0.0) >= thr_raw]
-
-            # If filtering removes everything, return the single best match (if available)
-            if not filtered and results:
-                filtered = [results[0]]
-
-            results = filtered
-        # probability-based threshold removed; we only support `threshold_raw` now
+            min_similarity=min_sim,
+            top_k=k)
+        logger.info(f"[Similar] Found {len(results)} results (min_similarity={min_sim:.2f}, top_k={k})")
+        if results:
+            logger.info(f"[Similar] Top result similarity: {results[0].get('similarity', 0):.4f}")
+            logger.info(f"[Similar] Bottom result similarity: {results[-1].get('similarity', 0):.4f}")
 
     except Exception as e:
+        logger.error(f"[Similar] Similarity search failed: {e}")
         raise HTTPException(status_code=500, detail=f"Similarity search failed: {e}")
 
     # debug logging removed

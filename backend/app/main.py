@@ -10,6 +10,11 @@ from app.api.v1.routes.similar import router as similar_router
 from app.manager.model_manager import ModelManager
 from app.core.config import settings
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s:     %(name)s - %(message)s'
+)
 logger = logging.getLogger("scene_search")
 
 logger.info(

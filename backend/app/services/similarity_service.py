@@ -13,48 +13,54 @@ class Similarity:
     def search(self,
                query_vector: np.ndarray,
                frames: list[dict[str, Any]],
-               alpha: float = 0.85,
                top_k: int = 50,
+               min_similarity: float = 0.60,
     ) -> list[dict[str, Any]]:
         """Search frames based on cosine similarity to the query vector.
 
         Args:
             query_vector: The embedding vector for the query image.
             frames: A list of frames, each containing an 'embedding' key with its vector.
-            alpha: Weight for CLIP similarity (semantic)
+            top_k: Maximum number of results to return.
+            min_similarity: Minimum similarity threshold (0.0 to 1.0). Only frames 
+                          with similarity >= this value will be returned.
 
         Returns:
-            A list of top_k frames sorted by similarity score.
+            A list of frames sorted by similarity score (cosine similarity), filtered
+            by min_similarity and limited to top_k results.
         """
-        results = []
 
+        query_vector = np.array(query_vector, dtype=np.float32)
+        
+        # Defensive normalization to ensure unit vectors
+        query_norm = norm(query_vector)
+        if query_norm > 0:
+            query_vector = query_vector / query_norm
+    
+        results = []
         for frame in frames:
             frame_vector = np.array(frame['embedding'], dtype=np.float32)
-            vector_score = self.cosine_similarity(query_vector, frame_vector)
-
-            # adjusted score mixes the raw cosine with a complementary signal
-            adjusted_score = alpha * vector_score + (1 - alpha) * (1 - vector_score)
-
-            # Normalize adjusted_score to a probability in [0,1]. The theoretical
-            # min and max of adjusted_score over vector_score in [-1,1] are:
-            #   min = 2 - 3*alpha
-            #   max = alpha
-            # We map adjusted_score -> [0,1] via linear scaling and clamp.
-            min_possible = 2.0 - 3.0 * alpha
-            max_possible = float(alpha)
-            denom = max_possible - min_possible if max_possible != min_possible else 1.0
-            probability = float((adjusted_score - min_possible) / denom)
-            probability = max(0.0, min(1.0, probability))
-
-            # add result (ranking/thresholding will use `probability`)
+            
+            # Defensive normalization for frame vector
+            frame_norm = norm(frame_vector)
+            if frame_norm > 0:
+                frame_vector = frame_vector / frame_norm
+            
+            # Dot product of normalized vectors = cosine similarity
+            similarity_score = float(np.dot(query_vector, frame_vector))
+            
             results.append({
                 'frame': frame,
-                'similarity': adjusted_score,
-                'raw_cosine': vector_score,
-                'probability': probability,
+                'similarity': similarity_score,
+                'raw_cosine': similarity_score,
+                'probability': max(0.0, min(1.0, similarity_score)),
             })
-
-        # Sort results by probability (higher = more similar)
-        results.sort(key=lambda x: x.get('probability', 0.0), reverse=True)
-
-        return results[:top_k]
+        
+        # Sort by similarity score (highest first)
+        results.sort(key=lambda x: x['similarity'], reverse=True)
+        
+        # Filter by minimum similarity threshold
+        filtered_results = [r for r in results if r['similarity'] >= min_similarity]
+        
+        # Return top_k results
+        return filtered_results[:top_k]
