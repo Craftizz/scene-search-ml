@@ -1,0 +1,49 @@
+FROM pytorch/pytorch:2.2.0-cuda11.8-cudnn8-runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Install system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+       build-essential git libgl1 libglib2.0-0 libjpeg-dev curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade conda base packages to avoid version conflicts
+RUN conda install -y -c conda-forge huggingface_hub>=0.21 && conda clean -ya
+
+COPY requirements.txt /app/requirements.txt
+
+# The base image already contains a compatible torch+cuda build. pip will
+# skip reinstalling torch if the installed version satisfies requirements.
+RUN pip install --upgrade pip \
+    && pip install --no-cache-dir -r /app/requirements.txt
+
+# Create dummy flash_attn module to satisfy import checks
+# Florence-2 checks for flash_attn but works fine with eager attention
+RUN mkdir -p /opt/conda/lib/python3.10/site-packages/flash_attn \
+    && echo "# Dummy flash_attn module - not actually used" > /opt/conda/lib/python3.10/site-packages/flash_attn/__init__.py
+    
+# Optionally pre-download model snapshots at build-time to bake them into the image.
+# Set PRELOAD_MODELS=0 to skip download. If your models are private, pass
+# --build-arg HUGGINGFACE_HUB_TOKEN=<token>
+ARG PRELOAD_MODELS=1
+ARG HUGGINGFACE_HUB_TOKEN=""
+RUN if [ "$PRELOAD_MODELS" = "1" ]; then \
+      python -c "from huggingface_hub import snapshot_download; import os; token=os.environ.get('HUGGINGFACE_HUB_TOKEN') or os.environ.get('HUGGINGFACE_TOKEN') or None; snapshot_download('google/siglip-base-patch16-224', local_dir='/app/models/siglip', local_dir_use_symlinks=False, token=token)"; \
+      python -c "from huggingface_hub import snapshot_download; import os; token=os.environ.get('HUGGINGFACE_HUB_TOKEN') or os.environ.get('HUGGINGFACE_TOKEN') or None; snapshot_download('microsoft/Florence-2-base', local_dir='/app/models/florence2', local_dir_use_symlinks=False, token=token)"; \
+      echo "Models downloaded to /app/models/"; \
+      ls -la /app/models/; \
+    else echo 'Skipping model preload'; fi
+
+# Set environment variables for local model paths (baked into image)
+ENV SIGLIP_LOCAL_DIR=/app/models/siglip
+ENV FLORENCE_LOCAL_DIR=/app/models/florence2
+ENV TRANSFORMERS_TRUST_REMOTE_CODE=1
+
+COPY . /app
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

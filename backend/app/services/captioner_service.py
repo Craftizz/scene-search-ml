@@ -1,11 +1,12 @@
 
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Optional, List, Any
 from PIL import Image
 import asyncio
+import os
 import torch
 import logging
-from transformers import AutoProcessor, AutoModelForCausalLM
+from transformers import AutoProcessor, AutoModelForCausalLM, AutoConfig
 
 logger = logging.getLogger("scene_search")
 
@@ -29,46 +30,70 @@ class CaptionResult:
 
 
 class Captioner:
-    def __init__(self, config: CaptionerConfig):
-        self.config = config
+    def __init__(self, config: CaptionerConfig) -> None:
+        self.config: CaptionerConfig = config
 
         if config.device:
-            self.device = torch.device(config.device)
+            self.device: torch.device = torch.device(config.device)
         else:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # For thread/async-safety when using shared model
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock = asyncio.Lock()
 
         # Load model with proper dtype
         torch_dtype = torch.float16 if config.use_fp16 and self.device.type == "cuda" else torch.float32
         
         try:
-            # Load model configuration first to set attention implementation
-            from transformers import AutoConfig
-            model_config = AutoConfig.from_pretrained(
-                config.model_name,
-                trust_remote_code=True
-            )
-            # Disable SDPA to avoid compatibility issues
-            model_config._attn_implementation = "eager"
+            # Prefer local snapshot path baked into the image (to avoid runtime HF downloads)
+            local_dir = os.environ.get("FLORENCE_LOCAL_DIR") or None
             
-            self.model = AutoModelForCausalLM.from_pretrained(
-                config.model_name, 
-                config=model_config,
-                torch_dtype=torch_dtype,
+            # Verify local directory exists and has required files
+            use_local = False
+            if local_dir:
+                if os.path.isdir(local_dir):
+                    # Check if directory has model files
+                    if os.path.exists(os.path.join(local_dir, "config.json")):
+                        use_local = True
+                        logger.info(f"Using local Florence-2 from: {local_dir}")
+                    else:
+                        logger.warning(f"Local dir {local_dir} exists but missing config.json")
+                else:
+                    logger.warning(f"FLORENCE_LOCAL_DIR set but path doesn't exist: {local_dir}")
+            
+            model_path = local_dir if use_local and local_dir is not None else config.model_name
+            if not use_local:
+                logger.info(f"Loading Florence-2 from HuggingFace: {config.model_name}")
+            
+            # Load model WITHOUT device_map (Florence-2 doesn't support it)
+            load_kwargs = {
+                "torch_dtype": torch_dtype,
+                "local_files_only": use_local,
+                "attn_implementation": "eager",  # Force eager to avoid flash_attn
+            }
+                
+            self.model: Any = AutoModelForCausalLM.from_pretrained(
+                model_path,
                 trust_remote_code=True,
-                device_map="auto" if self.device.type == "cuda" else None
+                **load_kwargs
             )
             
-            self.processor = AutoProcessor.from_pretrained(
-                config.processor_name, 
-                trust_remote_code=True
+            # Manually move model to device (Florence-2 doesn't support device_map='auto')
+            self.model.to(self.device)
+            self.model.eval()
+
+            # Load processor
+            processor_path = local_dir if use_local and local_dir is not None else config.processor_name
+            processor_kwargs = {
+                "use_fast": True,
+                "local_files_only": use_local,
+            }
+                
+            self.processor: Any = AutoProcessor.from_pretrained(
+                processor_path,
+                trust_remote_code=True,
+                **processor_kwargs
             )
-            
-            # Move to device if not using device_map
-            if self.device.type != "cuda":
-                self.model.to(self.device)  # type: ignore
                 
             logger.info("Florence2 model loaded successfully")
             

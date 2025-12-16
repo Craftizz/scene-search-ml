@@ -1,21 +1,44 @@
-from typing import Any
+from typing import Any, List, Dict
 import numpy as np
 from numpy.linalg import norm
+from numpy.typing import NDArray
 
 
 class Similarity:
+    """Similarity utilities for computing cosine similarity and searching.
+
+    Methods accept and return plain Python types (lists/dicts) for easy
+    serialization across API boundaries.
+    """
+
+    def cosine_similarity(self, a: NDArray[np.floating], b: NDArray[np.floating]) -> float:
+        """Compute cosine similarity between two 1-D numpy arrays.
+
+        Args:
+            a: 1-D array-like numeric vector.
+            b: 1-D array-like numeric vector.
+
+        Returns:
+            Cosine similarity as a float in [-1.0, 1.0].
+        """
+
+        a_arr = np.asarray(a, dtype=np.float32)
+        b_arr = np.asarray(b, dtype=np.float32)
+        a_norm = norm(a_arr)
+        b_norm = norm(b_arr)
+        if a_norm == 0 or b_norm == 0:
+            return 0.0
+
+        return float(np.dot(a_arr, b_arr) / (a_norm * b_norm))
 
 
-    def cosine_similarity(self, a: np.ndarray, b: np.ndarray) -> float:
-        return float(np.dot(a, b) / (norm(a) * norm(b)))
-    
-
-    def search(self,
-               query_vector: np.ndarray,
-               frames: list[dict[str, Any]],
-               top_k: int = 50,
-               min_similarity: float = 0.60,
-    ) -> list[dict[str, Any]]:
+    def search(
+        self,
+        query_vector: NDArray[np.floating],
+        frames: List[Dict[str, Any]],
+        top_k: int = 50,
+        min_similarity: float = 0.60,
+    ) -> List[Dict[str, Any]]:
         """Search frames based on cosine similarity to the query vector.
 
         Args:

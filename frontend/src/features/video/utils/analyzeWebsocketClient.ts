@@ -1,7 +1,10 @@
 ﻿export type AnalyzeMessage =
   | { type: "embedded_batch"; timestamps: number[]; embeddings: number[][] }
   | { type: "embedded_chunk"; timestamps: number[]; embeddings: number[][] }
-  | { type: "scene"; timestamp: number; image?: string; caption?: string }
+  | { type: "scene"; timestamp: number; image?: string; caption?: string; request_id?: string }
+  | { type: "caption_started"; request_id: string }
+  | { type: "caption_chunk"; request_id: string; chunk: string; partial?: boolean }
+  | { type: "caption_result"; request_id: string; caption: string }
   | { type: "error"; message: string };
 
 export type AnalyzeClientOptions = {

@@ -85,6 +85,28 @@ async def root():
     }
 
 
+@app.get("/health")
+async def health():
+    """Health check endpoint for load balancers"""
+    return {
+        "status": "ok",
+        "models_loaded": ModelManager._initialized,
+        "environment": settings.environment,
+    }
+
+
+@app.get("/readiness")
+async def readiness():
+    """Readiness check - verifies models are loaded and functional"""
+    from fastapi import HTTPException
+    try:
+        ModelManager.get_embedder()
+        ModelManager.get_captioner()
+        return {"ready": True, "models": ["embedder", "captioner"]}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Models not ready: {str(e)}")
+
+
 if __name__ == "__main__":
 
     import uvicorn

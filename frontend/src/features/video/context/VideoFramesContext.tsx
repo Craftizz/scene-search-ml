@@ -10,6 +10,7 @@ type VideoFramesContextValue = {
   addScene: (s: Scene) => void;
   clearScenes: () => void;
   setScenes: (list: Scene[]) => void;
+  updateScene?: (idOrRequestId: string | number, patch: Partial<Scene> | ((s: Scene) => Partial<Scene>)) => void;
   clearFrames: () => void;
   setFrames: (list: Frame[]) => void;
   updateFrame: (f: Frame) => void;
@@ -66,6 +67,16 @@ export const VideoFramesProvider: React.FC<React.PropsWithChildren<{}>> = ({
     setScenesState(() => list);
   }, []);
 
+  const updateScene = useCallback((idOrRequestId: string | number, patch: Partial<Scene> | ((s: Scene) => Partial<Scene>)) => {
+    setScenesState((prev) => prev.map((s) => {
+      if (s.id === idOrRequestId || s.request_id === idOrRequestId) {
+        const delta = typeof patch === "function" ? patch(s) : patch;
+        return { ...s, ...delta };
+      }
+      return s;
+    }));
+  }, []);
+
   const updateFrame = useCallback((frame: Frame) => {
     setFramesState((prev) => prev.map((p) => (p.timestamp === frame.timestamp && p.url === frame.url ? frame : p)));
   }, []);
@@ -99,7 +110,7 @@ export const VideoFramesProvider: React.FC<React.PropsWithChildren<{}>> = ({
 
   return (
     <VideoFramesContext.Provider
-      value={{ frames, scenes, addFrame, addScene, clearFrames, clearScenes, setFrames, setScenes, updateFrame, registerVideo, seekTo }}
+      value={{ frames, scenes, addFrame, addScene, clearFrames, clearScenes, setFrames, setScenes, updateScene, updateFrame, registerVideo, seekTo }}
     >
       {children}
     </VideoFramesContext.Provider>

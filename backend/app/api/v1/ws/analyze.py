@@ -1,8 +1,10 @@
 from __future__ import annotations
 import logging
+import secrets
 from fastapi import APIRouter, WebSocket
 
 from app.core.config import settings
+from app.core.rate_limiter import limiter
 from .analyze_session import AnalyzeSession, SessionConfig
 
 """Websocket route for analysis.
@@ -34,13 +36,26 @@ async def analyze(websocket: WebSocket):
         logger.exception("Failed to log ws handshake headers")
 
     expected = settings.api_key
-    if expected and api_key != expected:
-        # In development allow mismatched keys (convenience) but close in prod
-        if settings.environment == "development":
-            pass
-        else:
-            await websocket.close(code=1008)
-            return
+    if expected:
+        # Compare using constant-time comparison to avoid timing attacks
+        if not api_key or not secrets.compare_digest(str(api_key), str(expected)):
+            # In development allow mismatched keys (convenience) but close in prod
+            if settings.environment == "development":
+                pass
+            else:
+                await websocket.close(code=1008)
+                return
+
+    # Enforce websocket concurrency limits per key/ip
+    ws_key = api_key if api_key else (websocket.client.host if websocket.client else "anon")
+    try:
+        ok = await limiter.acquire_ws(str(ws_key))
+    except Exception:
+        ok = False
+    if not ok:
+        # 1013 = Try again later
+        await websocket.close(code=1013)
+        return
 
     # parse optional session config from query params (including detection tuning)
     batch_size = websocket.query_params.get("batch_size")
@@ -70,5 +85,5 @@ async def analyze(websocket: WebSocket):
     except Exception:
         pass
 
-    session = AnalyzeSession(websocket, config=cfg)
+    session = AnalyzeSession(websocket, config=cfg, ws_key=str(ws_key))
     await session.run()

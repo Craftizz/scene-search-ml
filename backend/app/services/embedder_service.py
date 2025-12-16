@@ -2,10 +2,12 @@
 import asyncio
 from dataclasses import dataclass
 import logging
+from typing import Any, List
 
+import os
 import torch
 from PIL import Image
-from transformers import SiglipModel, SiglipProcessor
+from transformers import AutoProcessor, AutoModel
 
 logger = logging.getLogger("scene_search")
 
@@ -29,21 +31,47 @@ class EmbedTextResult:
     vector: list[float]
 
 
+
 class Embedder:
 
-    def __init__(self, config: EmbedderConfig):
-        self.config = config
+    def __init__(self, config: EmbedderConfig) -> None:
+        self.config: EmbedderConfig = config
 
         if config.device:
-            self.device = torch.device(config.device)
+            self.device: torch.device = torch.device(config.device)
         else:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock = asyncio.Lock()
         
         try:
-            self.processor = SiglipProcessor.from_pretrained(config.model_name)
-            self.model = SiglipModel.from_pretrained(config.model_name)
+            # Prefer a locally downloaded model snapshot if provided (built into image)
+            local_dir = os.environ.get("SIGLIP_LOCAL_DIR") or None
+            
+            # Verify local directory exists and has required files
+            use_local = False
+            if local_dir:
+                if os.path.isdir(local_dir):
+                    if os.path.exists(os.path.join(local_dir, "config.json")):
+                        use_local = True
+                        logger.info(f"Using local SigLIP from: {local_dir}")
+                    else:
+                        logger.warning(f"Local dir {local_dir} exists but missing config.json")
+                else:
+                    logger.warning(f"SIGLIP_LOCAL_DIR set but path doesn't exist: {local_dir}")
+            
+            if use_local:
+                self.processor: Any = AutoProcessor.from_pretrained(
+                    local_dir, use_fast=True, local_files_only=True, trust_remote_code=True
+                )
+                self.model: Any = AutoModel.from_pretrained(
+                    local_dir, local_files_only=True, trust_remote_code=True
+                )
+            else:
+                # Fall back to HF hub (online) if no local snapshot is present
+                logger.info(f"Loading SigLIP from HuggingFace: {config.model_name}")
+                self.processor: Any = AutoProcessor.from_pretrained(config.model_name, use_fast=True, trust_remote_code=True)
+                self.model: Any = AutoModel.from_pretrained(config.model_name, trust_remote_code=True)
         except Exception as e:
             raise RuntimeError(
                 f"Failed to load SigLIP model '{config.model_name}': {e}\n"
@@ -54,7 +82,7 @@ class Embedder:
         self.model.eval()
 
 
-    async def embed_images(self, images: list[Image.Image]) -> list[EmbedImageResult]:
+    async def embed_images(self, images: List[Image.Image]) -> List[EmbedImageResult]:
         """Generate embeddings for a list of PIL Images.
 
         Processes the list in chunks of `batch_size` and returns a list of
@@ -73,7 +101,7 @@ class Embedder:
             if not isinstance(im, Image.Image):
                 raise TypeError(f"images[{i}] is not a PIL.Image instance")
 
-        results: list[EmbedImageResult] = []
+        results: List[EmbedImageResult] = []
 
         for i in range(0, len(images), self.config.batch_size):
             batch = images[i : i + self.config.batch_size]

@@ -18,7 +18,7 @@ logger = logging.getLogger("scene_search")
 class SimilarRequest(BaseModel):
     string: str
     frames: List[dict[str, Any]]
-    min_similarity: Optional[float] = 0.0
+    min_similarity: Optional[float] = 0.030
     top_k: Optional[int] = 50
 
 
@@ -72,7 +72,7 @@ async def similar(
         similarity = Similarity()
 
         # Search with configurable threshold and top_k
-        min_sim = payload.min_similarity if payload.min_similarity is not None else 0.0
+        min_sim = payload.min_similarity if payload.min_similarity is not None else 0.60
         k = payload.top_k if payload.top_k is not None else 50
         
         results = similarity.search(

@@ -6,3 +6,8 @@
     border-right: 1px solid var(--border);
     padding: 1rem 4px;
 }
+
+.noResults {
+    padding: 8px;
+    font-size: var(--font-size-xs);
+}

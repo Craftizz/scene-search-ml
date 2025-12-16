@@ -118,11 +118,6 @@ def is_stable_cut(
     return ratio >= 0.5
 
 
-def compute_blur_score(*args, **kwargs):
-    """Blur detection removed; function intentionally disabled."""
-    raise RuntimeError("compute_blur_score is removed; blur detection disabled")
-
-
 # Advanced implementation with adaptive thresholding
 def detect_boundaries_adaptive(
     embeddings: List[np.ndarray],

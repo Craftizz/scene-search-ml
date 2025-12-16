@@ -7,10 +7,15 @@ from dataclasses import dataclass
 from fastapi import WebSocket, WebSocketDisconnect
 from PIL import Image
 import numpy as np
+import logging
 
 from app.core.config import settings
 from app.manager.model_manager import ModelManager
 from app.services.scene_detection_service import detect_boundaries
+from app.core.image_limits import validate_image_dimensions
+from uuid import uuid4
+
+logger = logging.getLogger("scene_search")
 
 """analyze_session.py
 
@@ -65,8 +70,18 @@ class FrameBatch:
         imgs = []
         for b in raw_bytes:
             try:
-                imgs.append(Image.open(BytesIO(b)).convert("RGB"))
-            except Exception:
+                im = Image.open(BytesIO(b))
+                # Use shared validation utility; treat invalid images as None
+                try:
+                    validate_image_dimensions(im)
+                except Exception as e:
+                    logger.debug("Dropping image during decode due to validation: %s", e)
+                    imgs.append(None)
+                    continue
+
+                imgs.append(im.convert("RGB"))
+            except Exception as e:
+                logger.debug("Failed to decode image bytes: %s", e)
                 imgs.append(None)
         return imgs
     
@@ -159,8 +174,8 @@ class SceneEmitter:
                     if (scene_ts - self._last_emitted_ts) < float(self.config.min_scene_gap_sec):
                         last_sent = global_idx + 1
                         continue
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Error checking min_scene_gap_sec: %s", e)
             
             # compute a best-effort end timestamp for the scene
             end_ts = self._compute_end_timestamp(
@@ -171,7 +186,8 @@ class SceneEmitter:
             try:
                 self._scene_counter += 1
                 scene_idx = int(self._scene_counter)
-            except Exception:
+            except Exception as e:
+                logger.exception("Failed to increment scene counter: %s", e)
                 scene_idx = None
             
             # build message payload
@@ -204,7 +220,8 @@ class SceneEmitter:
             if 0 <= next_global < len(pending):
                 return float(pending[next_global].timestamp)
             return None
-        except Exception:
+        except Exception as e:
+            logger.debug("Error computing end timestamp: %s", e)
             return None
     
     def get_last_scene_embedding(
@@ -223,7 +240,8 @@ class SceneEmitter:
                 emb = pending[global_idx].embedding
                 if emb is not None:
                     return np.array(emb, dtype=float)
-        except Exception:
+        except Exception as e:
+            logger.debug("Error extracting last scene embedding: %s", e)
             pass
         return None
 
@@ -239,7 +257,7 @@ class AnalyzeSession:
     can be instantiated concurrently for multiple websocket clients.
     """
 
-    def __init__(self, websocket: WebSocket, config: Optional[SessionConfig] = None):
+    def __init__(self, websocket: WebSocket, config: Optional[SessionConfig] = None, ws_key: Optional[str] = None):
         """Create a new session bound to `websocket`.
 
         Args:
@@ -263,6 +281,8 @@ class AnalyzeSession:
         self._bytes_buf: List[bytes] = []
         self._ts_buf: List[float] = []
         self._lock = asyncio.Lock()
+        # Lock protecting access to the pending frames buffer
+        self._pending_lock = asyncio.Lock()
         self._timer: Optional[asyncio.Task] = None
         self._flush_task: Optional[asyncio.Task] = None
         self._pending: List[PendingFrame] = []
@@ -270,6 +290,8 @@ class AnalyzeSession:
         self.BATCH_SIZE = min(self.config.batch_size, settings.max_batch_size)
         self.BATCH_TIMEOUT = self.config.batch_timeout
         self._closed = False
+        # optional key used for websocket slot accounting
+        self._ws_key = ws_key
 
 
     async def _send(self, obj: dict) -> None:
@@ -280,8 +302,9 @@ class AnalyzeSession:
         """
         try:
             await self.websocket.send_json(obj)
-        except Exception:
-            # ignore send errors — connection may already be closed
+        except Exception as e:
+            # ignore send errors — connection may already be closed, but log at debug
+            logger.debug("Failed to send websocket message: %s", e)
             return
 
 
@@ -297,13 +320,22 @@ class AnalyzeSession:
             img_bytes: Raw image bytes (JPEG/PNG) sent by the client.
             timestamp: Float timestamp associated with the frame.
         """
+        # Quick reject for excessively large frames
+        max_size = getattr(settings, "max_upload_size_bytes", 0)
+        if max_size and len(img_bytes) > max_size:
+            try:
+                await self._send({"type": "error", "message": "frame too large"})
+            except Exception:
+                logger.debug("Failed to notify client about oversized frame")
+            return
+
         async with self._lock:
             total_queued = len(self._pending) + len(self._bytes_buf)
             if total_queued >= self.config.max_pending:
                 try:
                     await self._send({"type": "error", "message": "max_pending exceeded, frame dropped"})
                 except Exception:
-                    pass
+                    logger.debug("Failed to notify client about max_pending")
                 return
 
             self._bytes_buf.append(img_bytes)
@@ -429,9 +461,20 @@ class AnalyzeSession:
             "embeddings": embeddings_list
         })
 
-        # Buffer frames for scene grouping
-        for ts, emb, img in zip(timestamps, embeddings_list, images):
-            self._pending.append(PendingFrame(timestamp=ts, embedding=emb, image=img))
+        # Buffer frames for scene grouping — extend under lock to avoid races
+        pending_items = [PendingFrame(timestamp=ts, embedding=emb, image=img)
+                         for ts, emb, img in zip(timestamps, embeddings_list, images)]
+        try:
+            async with self._pending_lock:
+                self._pending.extend(pending_items)
+        except Exception as e:
+            logger.exception("Failed to append pending items under lock: %s", e)
+            # Best-effort: if locking fails, append without lock (rare)
+            for it in pending_items:
+                try:
+                    self._pending.append(it)
+                except Exception:
+                    logger.debug("Failed to append pending item during fallback")
 
     def _detect_scenes(self, embeddings: List[np.ndarray]) -> List[dict]:
         """Run scene boundary detection on embeddings."""
@@ -452,7 +495,8 @@ class AnalyzeSession:
         if scenes:
             try:
                 self.last_scene_baseline = np.array(scenes[-1]["embedding"], dtype=float)
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to update last_scene_baseline from scenes: %s", e)
                 self.last_scene_baseline = None
         elif smoothed:
             self.last_scene_baseline = smoothed[-1]
@@ -462,28 +506,109 @@ class AnalyzeSession:
 
     async def _emit_scene_messages(self, scenes: List[dict], batch_size: int) -> None:
         """Compute and send scene messages to the client."""
-        batch_start = len(self._pending) - batch_size
         scene_indices = sorted(int(d.get("index", 0)) for d in scenes)
 
-        messages = self._scene_emitter.compute_scene_messages(
-            scene_indices, self._pending, batch_start, batch_size
-        )
+        # Work on a snapshot of pending frames while holding the pending lock
+        async with self._pending_lock:
+            pending_snapshot = self._pending.copy()
+            batch_start = len(pending_snapshot) - batch_size
 
-        for msg in messages:
-            await self._send(msg)
+            messages = self._scene_emitter.compute_scene_messages(
+                scene_indices, pending_snapshot, batch_start, batch_size
+            )
 
-        # Update baseline to last scene embedding if available
-        last_emb = self._scene_emitter.get_last_scene_embedding(
-            self._pending, batch_start, scene_indices
-        )
-        if last_emb is not None:
-            self.last_scene_baseline = last_emb
+            # attach request ids and prepare caption jobs based on the snapshot
+            messages_out: list[dict] = []
+            caption_jobs: list[tuple[str, Image.Image]] = []
 
-        # Trim pending buffer (keep frames after last emitted scene)
-        if scene_indices:
-            last_rel_idx = scene_indices[-1]
-            last_global = batch_start + last_rel_idx + 1
-            self._pending = self._pending[last_global:]
+            for idx, msg in enumerate(messages):
+                try:
+                    req_id = f"cap-{uuid4().hex}"
+                    msg["request_id"] = req_id
+                except Exception as e:
+                    logger.debug("Failed to attach request_id: %s", e)
+                    req_id = None
+
+                messages_out.append(msg)
+
+                # map message to the corresponding pending frame via scene_indices
+                try:
+                    rel_idx = scene_indices[idx] if idx < len(scene_indices) else None
+                    if rel_idx is not None:
+                        global_idx = batch_start + rel_idx
+                        if 0 <= global_idx < len(pending_snapshot):
+                            pending_frame = pending_snapshot[global_idx]
+                            if pending_frame and pending_frame.image is not None and req_id is not None:
+                                caption_jobs.append((req_id, pending_frame.image))
+                except Exception as e:
+                    logger.debug("Failed mapping scene to pending frame: %s", e)
+
+            # Update baseline to last scene embedding if available (from snapshot)
+            last_emb = self._scene_emitter.get_last_scene_embedding(
+                pending_snapshot, batch_start, scene_indices
+            )
+            if last_emb is not None:
+                self.last_scene_baseline = last_emb
+
+            # Trim the real pending buffer (keep frames after last emitted scene)
+            if scene_indices:
+                last_rel_idx = scene_indices[-1]
+                last_global = batch_start + last_rel_idx + 1
+                # guard last_global bounds
+                if last_global < 0:
+                    last_global = 0
+                if last_global >= len(self._pending):
+                    # nothing remains
+                    self._pending = []
+                else:
+                    self._pending = self._pending[last_global:]
+
+        # Send messages and schedule caption tasks (outside lock)
+        for msg in messages_out:
+            try:
+                await self._send(msg)
+            except Exception as e:
+                logger.debug("Failed to send scene message: %s", e)
+
+        for req_id, img in caption_jobs:
+            try:
+                asyncio.create_task(self._run_caption_and_forward(req_id, img))
+            except Exception as e:
+                logger.debug("Failed to schedule caption job: %s", e)
+
+    async def _run_caption_and_forward(self, request_id: str, image: Image.Image) -> None:
+        """Run captioner on `image` and forward results over websocket.
+
+        This runs in a fire-and-forget background task so it must handle
+        all exceptions and not rely on session state beyond `self.websocket`.
+        """
+        try:
+            # notify client caption work started
+            try:
+                await self._send({"type": "caption_started", "request_id": request_id})
+            except Exception as e:
+                logger.debug("Failed to send caption_started: %s", e)
+
+            captioner = ModelManager.get_captioner()
+            results = await captioner.caption([image])
+            caption_text = results[0].text if results and len(results) > 0 else ""
+
+            # send final caption
+            try:
+                await self._send({
+                    "type": "caption_result",
+                    "request_id": request_id,
+                    "caption": caption_text,
+                })
+            except Exception as e:
+                logger.debug("Failed to send caption_result: %s", e)
+
+        except Exception as e:
+            logger.exception("Caption task failed: %s", e)
+            try:
+                await self._send({"type": "error", "request_id": request_id, "message": f"caption error: {e}"})
+            except Exception as e2:
+                logger.debug("Failed to notify client of caption error: %s", e2)
 
 
     async def run(self) -> None:
@@ -499,7 +624,8 @@ class AnalyzeSession:
             while True:
                 try:
                     msg = await self.websocket.receive()
-                except Exception:
+                except Exception as e:
+                    logger.debug("Websocket receive error: %s", e)
                     break
 
                 if msg is None:
@@ -513,13 +639,15 @@ class AnalyzeSession:
                         import json as _json
 
                         meta = _json.loads(msg["text"]) if isinstance(msg["text"], str) else None
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("Failed to parse JSON meta: %s", e)
                         meta = None
 
                     if meta and meta.get("type") == "frame_meta":
                         try:
                             bin_msg = await self.websocket.receive()
-                        except Exception:
+                        except Exception as e:
+                            logger.debug("Failed to receive binary frame: %s", e)
                             continue
                         if bin_msg.get("bytes") is None:
                             continue
@@ -536,22 +664,22 @@ class AnalyzeSession:
                         continue
 
         except WebSocketDisconnect:
-            pass
+            logger.info("WebSocket disconnected by client")
         finally:
             # mark closed and cancel outstanding tasks
             self._closed = True
             if self._timer:
                 try:
                     self._timer.cancel()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to cancel timer: %s", e)
                 self._timer = None
 
             if self._flush_task and not self._flush_task.done():
                 try:
                     self._flush_task.cancel()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to cancel flush task: %s", e)
 
             # attempt a final flush if no active flush task
             if not (self._flush_task and not self._flush_task.done()):
@@ -559,3 +687,10 @@ class AnalyzeSession:
                     await self._flush()
                 except Exception:
                     pass
+            # Release websocket slot if it was acquired by the router
+            try:
+                if self._ws_key:
+                    from app.core.rate_limiter import limiter
+                    await limiter.release_ws(self._ws_key)
+            except Exception:
+                pass

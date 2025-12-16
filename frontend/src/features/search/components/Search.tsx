@@ -9,6 +9,8 @@ import type { Frame, Scene } from "@/types/types";
 export default function Search() {
 
   const { frames, scenes } = useVideoFrames();
+
+  const [query, setQuery] = useState<string>("");
   const [results, setResults] = useState<Frame[] | Scene[] | null>(null);
 
   async function handleSearch(query?: string) {
@@ -50,6 +52,7 @@ export default function Search() {
       );
 
       setResults(mapped);
+      setQuery(query);
 
     } catch (e) {
 
@@ -57,13 +60,24 @@ export default function Search() {
     }
   }
 
-  // Show `results` when a query is active; otherwise show detected `scenes` only.
-  const resultDisplay: Frame[] | Scene[] = results ?? (scenes ?? []);
+  const resultDisplay: Frame[] | Scene[] = results ?? scenes ?? [];
 
   return (
     <div className={styles.search}>
       <SearchBar onSearch={handleSearch} />
-      <Results items={resultDisplay} type={results ? "frames" : "scenes"} />
+
+      {query.length > 0 && results?.length === 0 ? (
+        <p className={styles.noResults}>We found nothing for "{query}"</p>
+      ) : (
+        <Results
+          items={resultDisplay}
+          type={
+            typeof query === "string" && query.trim().length > 0
+              ? "frames"
+              : "scenes"
+          }
+        />
+      )}
     </div>
   );
 }

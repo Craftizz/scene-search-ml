@@ -17,7 +17,8 @@ export default function Video() {
     addFrame, 
     addScene, 
     clearFrames, 
-    updateFrame 
+    updateFrame,
+    updateScene,
   } = useVideoFrames();
 
   const tsToUrlRef =
@@ -62,8 +63,15 @@ export default function Video() {
       timestamp: startTimestamp ?? 0,
       url: url ?? "",
       caption: (msg as any).caption,
+      request_id: (msg as any).request_id,
       end_timestamp: (msg as any).end_timestamp,
     });
+    // map request_id -> scene id for later caption updates
+    try {
+      const rid = (msg as any).request_id;
+      const sid = (msg as any).id ?? Date.now();
+      if (rid && updateScene) updateScene(rid, { request_id: rid });
+    } catch {}
   }
 
   useEffect(() => {
@@ -83,6 +91,26 @@ export default function Video() {
         client.onMessage((msg: AnalyzeMessage) => {
           if (msg.type === "scene") {
             handleSceneMessage(msg);
+            return;
+          }
+          if (msg.type === "caption_started") {
+            // optionally mark scene as loading
+            if (updateScene) updateScene((msg as any).request_id, { caption: "..." });
+            return;
+          }
+          if (msg.type === "caption_chunk") {
+            const rid = (msg as any).request_id;
+            const chunk = (msg as any).chunk;
+            if (rid && updateScene) {
+              // append chunk to existing caption
+              updateScene(rid, (s) => ({ caption: (s.caption ?? "") + String(chunk) } as any));
+            }
+            return;
+          }
+          if (msg.type === "caption_result") {
+            const rid = (msg as any).request_id;
+            const caption = (msg as any).caption;
+            if (rid && updateScene) updateScene(rid, { caption });
             return;
           }
           if (
@@ -137,7 +165,7 @@ export default function Video() {
       cancelled = true;
       client.close();
     };
-  }, [videoSrc, addFrame, addScene, clearFrames, updateFrame, apiKey]);
+  }, [videoSrc, addFrame, addScene, clearFrames, updateFrame, updateScene, apiKey]);
 
   return (
     <div className={styles.video}>

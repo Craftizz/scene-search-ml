@@ -11,5 +11,6 @@ export type Scene = {
   duration?: number;
   end_timestamp?: number;
   caption?: string;
+  request_id?: string;
   url: string;
 }
