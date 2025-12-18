@@ -1,6 +1,7 @@
 from typing import List, Optional, Dict, Any
 import numpy as np
 
+
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     """Compute cosine similarity between two embeddings."""
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
@@ -118,7 +119,6 @@ def is_stable_cut(
     return ratio >= 0.5
 
 
-# Advanced implementation with adaptive thresholding
 def detect_boundaries_adaptive(
     embeddings: List[np.ndarray],
     prev_embedding: Optional[np.ndarray] = None,
@@ -204,6 +204,8 @@ def detect_boundaries_adaptive(
                     last_scene_index = i
     
     return scenes
+
+
 
 
 # Utility function to merge scenes from chunked processing

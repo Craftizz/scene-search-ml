@@ -2,7 +2,7 @@
 import asyncio
 from dataclasses import dataclass
 import logging
-from typing import Any, List
+from typing import Any, List, Optional
 
 import os
 import torch
@@ -14,10 +14,8 @@ logger = logging.getLogger("scene_search")
 
 @dataclass
 class EmbedderConfig:
-
     model_name: str = "google/siglip-base-patch16-224"
-    device: str | None = None
-    
+    device: str | None = None    
     batch_size: int = 8
 
 
@@ -30,6 +28,7 @@ class EmbedImageResult:
 class EmbedTextResult:
     vector: list[float]
 
+from app.models import EmbeddingSmoothingConfig
 
 
 class Embedder:
@@ -155,3 +154,46 @@ class Embedder:
         logger.info(f"[Embedder] Text embedding dim: {len(embedding)}, norm: {norm:.6f}")
         
         return EmbedTextResult(vector=embedding.tolist())
+
+
+class EmbeddingSmoother:
+    """Apply exponential moving average smoothing to embeddings."""
+    
+    def __init__(self, config: EmbeddingSmoothingConfig):
+        """Initialize smoother.
+        
+        Args:
+            config: Smoothing configuration
+        """
+        self.config = config
+        self._ema: Optional[Any] = None  # numpy array
+    
+    def smooth_embeddings(self, embeddings: List[Any]) -> List[Any]:
+        """Apply EMA smoothing to embeddings.
+        
+        Args:
+            embeddings: List of numpy arrays
+            
+        Returns:
+            List of smoothed numpy arrays
+        """
+        if self.config.window_size <= 1:
+            return embeddings
+            
+        import numpy as np
+        alpha = 2.0 / (self.config.window_size + 1)
+        smoothed = []
+        
+        for emb in embeddings:
+            emb_array = np.array(emb, dtype=float)
+            if self._ema is None:
+                self._ema = emb_array.copy()
+            else:
+                self._ema = alpha * emb_array + (1.0 - alpha) * self._ema
+            smoothed.append(self._ema.copy())
+            
+        return smoothed
+    
+    def reset(self) -> None:
+        """Reset the smoothing state."""
+        self._ema = None

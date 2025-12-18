@@ -2,7 +2,7 @@
 
 ![Scene Search Demo](assets/images/preview.jpg)
 
-Lightweight app for extracting video frames, generating captions & embeddings, and searching scenes by text.
+Search inside videos using natural language. A Full-stack video search web app with real-time ML captioning, scene detection and semantic similarity search 
 
 ## Key Features
 

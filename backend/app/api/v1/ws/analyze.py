@@ -5,13 +5,15 @@ from fastapi import APIRouter, WebSocket
 
 from app.core.config import settings
 from app.core.rate_limiter import limiter
-from .analyze_session import AnalyzeSession, SessionConfig
+from app.manager.session_manager import AnalyzeSession
+from app.models import SessionConfig
 
 """Websocket route for analysis.
 
 This module exposes the `/v1/ws/analyze` websocket route and delegates
-per-connection handling to `AnalyzeSession` defined in
-`analyze_session.py`.
+per-connection handling to `AnalyzeSession` from `app.manager.session_manager`,
+which orchestrates the video analysis pipeline using a service-oriented
+architecture.
 """
 
 logger = logging.getLogger("scene_search")

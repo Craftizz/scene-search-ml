@@ -23,7 +23,6 @@ class CaptionerConfig:
     max_new_tokens: int = 1024
 
 
-
 @dataclass
 class CaptionResult:
     text: str
